@@ -265,23 +265,28 @@ function examStart() {
   $('#go').onclick = () => {
     const kind = $('input[name=kind]:checked').value;
     const essays = kind === 'group' ? FIRST_GROUP : shuffle(ESS).slice(0, 4).map(e => e.id);
-    store.set('exam', {kind, qs: compose(kind), ans: {}, essays, texts: {}, scores: {}, start: Date.now(), name: store.get('name', '')});
+    const qs = compose(kind);
+    store.set('exam', {kind, qs, order: Object.fromEntries(qs.map(id => [id, newOrder()])), ans: {}, essays, texts: {}, scores: {}, start: Date.now(), name: store.get('name', '')});
     examView();
   };
 }
 
-function qHtml(q, n, chosen, graded) {
+const ID4 = [0, 1, 2, 3];
+const newOrder = () => shuffle(ID4);
+const validOrder = o => Array.isArray(o) && o.length === 4 && ID4.every(i => o.includes(i)) ? o : ID4;
+function qHtml(q, n, chosen, graded, order) {
   const long = q.options.some(o => o.length > 34);
   const ok = graded && chosen === q.answer;
+  order = validOrder(order);
   return `<li class="q" data-id="${q.id}">
     ${graded ? `<span class="mark" aria-label="${ok ? 'correct' : 'wrong'}">${ok ? '✓' : '✗'}</span>` : ''}
     <span class="n">${n}.</span>
     <div class="stem">${esc(q.q)}${graded && q.src !== 'Teacher bank' ? `<span class="tag">${esc(q.src)}</span>` : ''}</div>
-    <div class="opts ${long ? 'long' : ''}">${q.options.map((o, i) => {
+    <div class="opts ${long ? 'long' : ''}">${order.map((i, pos) => {
       const cls = graded ? (i === q.answer ? 'right' : i === chosen ? 'wrong' : '') : '';
-      return `<label class="opt ${cls}"><input type="radio" name="${q.id}" value="${i}" ${chosen === i ? 'checked' : ''} ${graded ? 'disabled' : ''}><span class="L">${L[i]}</span><span>${esc(o)}</span></label>`;
+      return `<label class="opt ${cls}"><input type="radio" name="${q.id}" value="${i}" ${chosen === i ? 'checked' : ''} ${graded ? 'disabled' : ''}><span class="L">${L[pos]}</span><span>${esc(q.options[i])}</span></label>`;
     }).join('')}</div>
-    ${graded && !ok ? `<div class="why"><b>${L[q.answer]}</b> · ${esc(q.explain)}</div>` : ''}
+    ${graded && !ok ? `<div class="why"><b>${L[order.indexOf(q.answer)]}</b> · ${esc(q.explain)}</div>` : ''}
   </li>`;
 }
 
@@ -299,7 +304,7 @@ function examPaper(st) {
   <div id="confirm"></div>
   <section class="sheet">${header(st)}
     <h2 class="part">I. Choose the best answer for each question. (${n * MCQ_PTS} points, ${MCQ_PTS} for each)</h2>
-    <ol class="qs">${st.qs.map((id, i) => qHtml(byId[id], i + 1, st.ans[id], false)).join('')}</ol>
+    <ol class="qs">${st.qs.map((id, i) => qHtml(byId[id], i + 1, st.ans[id], false, st.order?.[id])).join('')}</ol>
     <h2 class="part">II. Write on the following 4 topics. (${st.essays.length * ESSAY_MAX} points, ${ESSAY_MAX} for each)</h2>
     ${st.essays.map((id, i) => `<div class="prompt" style="margin-top:18px">${i + 1}. ${esc(ESS.find(e => e.id === id).prompt)}</div>
       <textarea class="exam-essay" style="min-height:190px" data-id="${id}" aria-label="Your answer to question ${i + 1}" placeholder="Write as much as you can: what it is, key facts, why it matters, your own view.">${esc(st.texts[id] || '')}</textarea>
@@ -363,7 +368,7 @@ function examResult(st) {
       <span class="small muted">${st.timeUp ? 'Time ran out' : `Handed in after ${Math.floor(st.used / 60)} min ${st.used % 60} s`}</span></div></div>
     <div class="row"><button class="btn" id="again">New mock paper</button>${wrong ? `<a class="btn ghost" href="#practice" id="drill" style="text-decoration:none">Drill my ${wrong} mistake${wrong > 1 ? 's' : ''}</a>` : ''}</div>
     <h2 class="part">I. Multiple choice <span class="score">Score <b>${st.mcq}</b></span></h2>
-    <ol class="qs graded">${st.qs.map((id, i) => qHtml(byId[id], i + 1, st.ans[id], true)).join('')}</ol>
+    <ol class="qs graded">${st.qs.map((id, i) => qHtml(byId[id], i + 1, st.ans[id], true, st.order?.[id])).join('')}</ol>
     <h2 class="part">II. Essays <span class="score">Score <b>${essayTotal(st)}</b></span></h2>
     ${st.essays.map((id, i) => `<div class="ess"><div class="prompt">${i + 1}. ${esc(ESS.find(e => e.id === id).prompt)} <span class="score small">${st.scores[id] != null ? `· ${+st.scores[id]}/${ESSAY_MAX}` : ''}</span></div>
       <div class="model" style="background:none;border:1px solid var(--line);font-family:var(--f-pen);color:var(--blue);font-size:18px">${esc(st.texts[id] || '(no answer written)')}</div>
@@ -472,16 +477,16 @@ function drawCard() {
     $('#redo').onclick = () => { startSet(); drawCard(); };
     return;
   }
-  const q = byId[pq[pi]];
+  const q = byId[pq[pi]], order = newOrder();
   card.innerHTML = `<div class="pcard"><div class="pcount"><span>${esc(LES.find(l => l.id === practiceSet)?.title || q.setName)}${q.past ? ' · was on the 12 May paper' : ''}</span><span>${pi + 1}/${pq.length} · ${pright} right</span></div>
-    <ol class="qs">${qHtml(q, pi + 1, undefined, false)}</ol><div id="after"></div></div>`;
+    <ol class="qs">${qHtml(q, pi + 1, undefined, false, order)}</ol><div id="after"></div></div>`;
   card.querySelectorAll('input').forEach(inp => inp.onchange = () => {
     const c = +inp.value, ok = c === q.answer;
     const miss = new Set(store.get('mistakes', []));
     ok ? miss.delete(q.id) : miss.add(q.id);
     store.set('mistakes', [...miss]);
     if (ok) pright++;
-    card.querySelector('ol').outerHTML = `<ol class="qs graded">${qHtml(q, pi + 1, c, true)}</ol>`;
+    card.querySelector('ol').outerHTML = `<ol class="qs graded">${qHtml(q, pi + 1, c, true, order)}</ol>`;
     $('#after').innerHTML = `${ok ? `<div class="why"><b>✓</b> ${esc(q.explain)}</div>` : ''}<div class="row" style="margin-top:12px"><button class="btn" id="next">Next question</button></div>`;
     $('#next').focus();
     $('#next').onclick = () => { pi++; drawCard(); };
@@ -656,10 +661,10 @@ function drawLearn() {
     if ($('#nx')) $('#nx').onclick = () => { ls = {i: LES.indexOf(nextL), mode: 'cards', step: 0}; drawLearn(); scrollTo(0, 0); };
     return;
   }
-  const id = ls.queue[0], q = byId[id];
+  const id = ls.queue[0], q = byId[id], order = newOrder();
   $('#view').innerHTML = `<section class="sheet">${head(`${ls.right}/${ls.total} right`)}
     <div class="steps" aria-hidden="true">${Array.from({length: ls.total}, (_, i) => `<i class="${i < ls.right ? 'on' : ''}"></i>`).join('')}</div>
-    <div class="pcard" style="margin-top:18px"><ol class="qs">${qHtml(q, ls.right + 1, undefined, false)}</ol><div id="after"></div></div></section>`;
+    <div class="pcard" style="margin-top:18px"><ol class="qs">${qHtml(q, ls.right + 1, undefined, false, order)}</ol><div id="after"></div></div></section>`;
   $('#quit').onclick = quitLearn;
   $('#view').querySelectorAll('.pcard input').forEach(inp => inp.onchange = () => {
     const c = +inp.value, ok = c === q.answer, retried = ls.missed.has(id), n = ls.right + 1;
@@ -670,7 +675,7 @@ function drawLearn() {
     ls.queue.shift();
     if (ok) ls.right++;
     else { ls.missed.add(id); ls.queue.splice(Math.min(2, ls.queue.length), 0, id); }
-    $('#view .pcard ol').outerHTML = `<ol class="qs graded">${qHtml(q, n, c, true)}</ol>`;
+    $('#view .pcard ol').outerHTML = `<ol class="qs graded">${qHtml(q, n, c, true, order)}</ol>`;
     const h = hookFor(id);
     $('#after').innerHTML = `${h ? `<div class="mem" style="min-height:0;padding:12px 0 0"><div class="hook">${esc(h.hook)}</div></div>` : ok ? `<div class="why">${esc(q.explain)}</div>` : ''}
       <div class="row" style="margin-top:12px"><button class="btn" id="go-on">${ok ? 'Next' : 'Got it, ask me again'}</button></div>`;
